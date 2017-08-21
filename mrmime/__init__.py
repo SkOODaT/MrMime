@@ -24,9 +24,8 @@ _mr_mime_cfg = {
     'goman_hashing_rate_limit': None,   # Artificial rate limiting for GoMan hashing. Needs goman_hashing to be enabled.
     'goman_hashing_max_rpm_count': None,    # Artificial remaining RPM for GoMan hashing.
     'parallel_logins': True,            # Parallel logins increases number of requests.
-    'retry_on_hash_quota_exceeded': True,   # DEPRECATED, use retry_on_hashing_error below!
-    'retry_on_hashing_error': True,     # Retry requests on recoverable hash server errors (offline, timeout, quota exceeded)
     'exception_on_captcha': True,       # Raise CaptchaException if captcha detected
+    'dump_bad_requests': False,
     # --- account login specific
     'login_retries': 3,                 # Number of login retries
     'login_delay': 6,                   # Delay between login retries
