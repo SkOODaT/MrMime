@@ -5,11 +5,12 @@ import random
 import time
 from threading import Lock
 
+import copy
 import requests
 from pgoapi import PGoApi
 from pgoapi.exceptions import AuthException, PgoapiError, \
     BannedAccountException, NoHashKeyException, ServerSideRequestThrottlingException, ServerBusyOrOfflineException, \
-    NianticIPBannedException
+    NianticIPBannedException, BadHashRequestException
 from pgoapi.protos.pogoprotos.inventory.item.item_id_pb2 import *
 from pgoapi.utilities import get_cell_ids, f2i
 
@@ -71,8 +72,8 @@ class POGOAccount(object):
         self.altitude = None
 
         # Count number of rareless scans (to detect shadowbans)
-        self.rareless_scans = 0
-        self.shadowbanned = False
+        self.rareless_scans = None
+        self.shadowbanned = None
 
         # Last log message (for GUI/console)
         self.last_msg = ""
@@ -248,6 +249,32 @@ class POGOAccount(object):
             if not self.cfg['parallel_logins']:
                 login_lock.release()
 
+    def rotate_proxy(self):
+        if self._proxy_provider:
+            old_proxy = self._proxy_url
+            self._proxy_url = self._proxy_provider.next()
+            if self._proxy_url != old_proxy:
+                self.log_info("Rotating proxy. Old: {}  New: {}".format(old_proxy, self._proxy_url))
+                proxy_config = {
+                    'http': self._proxy_url,
+                    'https': self._proxy_url
+                }
+                self._api.set_proxy(proxy_config)
+                self._api._auth_provider.set_proxy(proxy_config)
+
+    def rotate_hash_key(self):
+        # Set hash key for this request
+        if not self._hash_key_provider:
+            msg = "No hash key configured!"
+            self.log_error(msg)
+            raise NoHashKeyException()
+
+        old_hash_key = self._hash_key
+        self._hash_key = self._hash_key_provider.next()
+        if self._hash_key != old_hash_key:
+            self.log_debug("Using hash key {}".format(self._hash_key))
+        self._api.activate_hash_server(self._hash_key)
+
     def is_logged_in(self):
         # Logged in? Enough time left? Cool!
         if self._api.get_auth_provider() and self._api.get_auth_provider().has_ticket():
@@ -285,15 +312,23 @@ class POGOAccount(object):
             'auth_service': self.auth_service,
             'system_id': None if release else self.cfg['pgpool_system_id'],
             'latitude': self.latitude,
-            'longitude': self.longitude,
-            'banned': self.is_banned(),
-            'shadowbanned': self.shadowbanned,
-            'captcha': self.has_captcha(),
-            'rareless_scans': self.rareless_scans
+            'longitude': self.longitude
         }
+        # After login we know whether we've got a captcha
+        if self.is_logged_in():
+            data.update({
+                'captcha': self.has_captcha()
+            })
+        if self.rareless_scans is not None:
+            data['rareless_scans'] = self.rareless_scans
+        if self.shadowbanned is not None:
+            data['shadowbanned'] = self.shadowbanned
+        if self._bad_request_ban:
+            data['banned'] = True
         if self._player_state:
             data.update({
                 'warn': self.is_warned(),
+                'banned': self.is_banned(),
                 'ban_flag': self.get_state('banned')
                 #'tutorial_state': data.get('tutorial_state'),
             })
@@ -332,8 +367,8 @@ class POGOAccount(object):
                 self.log_info("Successfully {}d PGPool account details".format(cmd))
             else:
                 self.log_warning("Got status code {} from PGPool while updating account details".format(r.status_code))
-        except:
-            self.log_debug("Could not update PGPool account details")
+        except Exception as e:
+            self.log_debug("Could not update PGPool account details: {}".format(repr(e)))
         self._last_pgpool_update = time.time()
 
     def req_get_map_objects(self):
@@ -445,7 +480,7 @@ class POGOAccount(object):
         responses = self.perform_request(lambda req: req.verify_challenge(token=captcha_token), action=4)
         if 'VERIFY_CHALLENGE' in responses:
             response = responses['VERIFY_CHALLENGE']
-            if 'success' in response:
+            if response.HasField('success'):
                 self.captcha_url = None
                 self.log_info("Successfully uncaptcha'd.")
                 return True
@@ -532,39 +567,28 @@ class POGOAccount(object):
             lat, lng = jitter_location(self.latitude, self.longitude)
             self._api.set_position(lat, lng, self.altitude)
 
+        req_method_list = copy.deepcopy(request._req_method_list)
+
         response = {}
+        rotate_proxy = False
         while True:
             try:
-                # Set hash key for this request
-                if not self._hash_key_provider:
-                    msg = "No hash key configured!"
-                    self.log_error(msg)
-                    raise NoHashKeyException()
-
-                old_hash_key = self._hash_key
-                self._hash_key = self._hash_key_provider.next()
-                if self._hash_key != old_hash_key:
-                    self.log_debug("Using hash key {}".format(self._hash_key))
-                self._api.activate_hash_server(self._hash_key)
+                self.rotate_hash_key()
+                if rotate_proxy:
+                    self.rotate_proxy()
+                    rotate_proxy = False
 
                 response = request.call(use_dict=False)
+
                 self._last_request = time.time()
                 break
-            except (ServerBusyOrOfflineException, ServerSideRequestThrottlingException) as ex:
-                # Retry unlimited
+            except (ServerBusyOrOfflineException, ServerSideRequestThrottlingException, BadHashRequestException ) as ex:
+                # Retry unlimited - because it might be better to fail
                 self.log_warning("{}: Retrying in 5s.".format(repr(ex)))
             except NianticIPBannedException as ex:
                 # Rotate proxy
                 self.log_warning("{}: Retrying in 5s.".format(repr(ex)))
-                if self._proxy_provider:
-                    self.log_warning("Rotating proxy")
-                    new_proxy = self._proxy_provider.next()
-                    proxy_config = {
-                        'http': new_proxy,
-                        'https': new_proxy
-                    }
-                    self._api.set_proxy(proxy_config)
-                    self._api._auth_provider.set_proxy(proxy_config)
+                rotate_proxy = True
             except PgoapiError as ex:
                 # This is bad.
                 raise
@@ -581,7 +605,7 @@ class POGOAccount(object):
             log_suffix = ''
             if self.cfg['dump_bad_requests']:
                 with open('BAD_REQUESTS.txt', 'a') as f:
-                    f.write(repr(request._req_method_list))
+                    f.write(repr(req_method_list))
                     f.close()
                 log_suffix = ' Dumped request to BAD_REQUESTS.txt.'
             self.log_warning("Got BAD_REQUEST response.{}".format(log_suffix))
@@ -693,7 +717,10 @@ class POGOAccount(object):
 
             elif response_type == 'GET_MAP_OBJECTS':
                 if is_rareless_scan(response):
-                    self.rareless_scans += 1
+                    if self.rareless_scans is None:
+                        self.rareless_scans = 1
+                    else:
+                        self.rareless_scans += 1
                 else:
                     self.rareless_scans = 0
 
@@ -1028,19 +1055,19 @@ class POGOAccount(object):
 
     def log_info(self, msg):
         self.last_msg = msg
-        log.info("[{}] {}".format(self.username, msg))
+        log.info(u"[{}] {}".format(self.username, msg))
 
     def log_debug(self, msg):
         self.last_msg = msg
-        log.debug("[{}] {}".format(self.username, msg))
+        log.debug(u"[{}] {}".format(self.username, msg))
 
     def log_warning(self, msg):
         self.last_msg = msg
-        log.warning("[{}] {}".format(self.username, msg))
+        log.warning(u"[{}] {}".format(self.username, msg))
 
     def log_error(self, msg):
         self.last_msg = msg
-        log.error("[{}] {}".format(self.username, msg))
+        log.error(u"[{}] {}".format(self.username, msg))
 
 
 class CaptchaException(PgoapiError):
