@@ -584,7 +584,7 @@ class POGOAccount(object):
                 break
             except (ServerBusyOrOfflineException, ServerSideRequestThrottlingException, BadHashRequestException ) as ex:
                 # Retry unlimited - because it might be better to fail
-                self.log_debug("{}: Retrying in 5s.".format(repr(ex)))
+                self.log_warning("{}: Retrying in 5s.".format(repr(ex)))
             except NianticIPBannedException as ex:
                 # Rotate proxy
                 self.log_warning("{}: Retrying in 5s.".format(repr(ex)))
