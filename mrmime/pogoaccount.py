@@ -61,6 +61,7 @@ class POGOAccount(object):
         self.inbox = {}
         self.inventory = None
         self.inventory_balls = 0
+        self.inventory_lures = 0
         self.inventory_total = 0
         self.incubators = []
         self.pokemon = {}
@@ -366,7 +367,8 @@ class POGOAccount(object):
                 'total_items': self.inventory_total,
                 'pokemon': len(self.pokemon),
                 'eggs': len(self.eggs),
-                'incubators': len(self.incubators)
+                'incubators': len(self.incubators),
+                'lures': self.inventory_lures
             })
         if self.inbox:
             data.update({
