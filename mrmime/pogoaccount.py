@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import logging
@@ -5,14 +6,11 @@ import random
 import time
 from threading import Lock
 
-import copy
 import requests
 from pgoapi import PGoApi
 from pgoapi.auth_ptc import AuthPtc
 from pgoapi.exceptions import AuthException, PgoapiError, \
-    BannedAccountException, NoHashKeyException, ServerSideRequestThrottlingException, ServerBusyOrOfflineException, \
-    NianticIPBannedException, BadHashRequestException, UnexpectedHashResponseException, HashingQuotaExceededException, \
-    NotLoggedInException
+    BannedAccountException, NoHashKeyException, NianticIPBannedException, NotLoggedInException
 from pgoapi.protos.pogoprotos.inventory.item.item_id_pb2 import *
 from pgoapi.utilities import get_cell_ids, f2i
 
@@ -269,6 +267,9 @@ class POGOAccount(object):
                     self.log_error(
                         'Failed to login. {} - Trying again in {} seconds.'.format(repr(ex),
                             self.cfg['login_delay']))
+                    # Let the exception for the last try bubble up.
+                    if num_tries >= self.cfg['login_retries']:
+                        raise
                     time.sleep(self.cfg['login_delay'])
 
             if num_tries >= self.cfg['login_retries']:
@@ -321,8 +322,8 @@ class POGOAccount(object):
 
     def is_logged_in(self):
         # Logged in? Enough time left? Cool!
-        if self._api.get_auth_provider() and self._api.get_auth_provider().has_ticket():
-            remaining_time = self._api.get_auth_provider()._ticket_expire / 1000 - time.time()
+        if self._api._auth_provider and self._api._auth_provider._access_token:
+            remaining_time = self._api._auth_provider._access_token_expiry - time.time()
             return remaining_time > 60
         return False
 
@@ -665,7 +666,7 @@ class POGOAccount(object):
                     f.write(repr(req_method_list))
                     f.close()
                 log_suffix = ' Dumped request to BAD_REQUESTS.txt.'
-            self.log_warning("Got BAD_REQUEST response.{}".format(log_suffix))
+            self.log_warning("Got BAD_REQUEST response. Possible Ban!{}".format(log_suffix))
             self._bad_request_ban = True
             raise BannedAccountException
 
