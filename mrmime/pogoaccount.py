@@ -94,7 +94,7 @@ class POGOAccount(object):
 
         # PGPool
         self._pgpool_auto_update_enabled = mrmime_pgpool_enabled() and self.cfg['pgpool_auto_update']
-        self._last_pgpool_update = 0
+        self._last_pgpool_update = time.time()
 
         self.callback_egg_hatched = None
 
@@ -411,8 +411,11 @@ class POGOAccount(object):
             r = requests.post(url, data=json.dumps(data))
             if r.status_code == 200:
                 self.log_info("Successfully {}d PGPool account.".format(cmd))
+            elif r.status_code == 503:
+                self.log_warning(
+                    "Could not update PGPool account: {} Try increasing 'pgpool_update_interval' in MrMime config.".format(r.content))
             else:
-                self.log_warning("Got status code {} from PGPool while updating account.".format(r.status_code))
+                self.log_warning("Got status {} from PGPool while updating account: {}".format(r.status_code, r.content))
         except Exception as e:
             self.log_error("Could not update PGPool account: {}".format(repr(e)))
         self._last_pgpool_update = time.time()
@@ -492,12 +495,6 @@ class POGOAccount(object):
             player_latitude=player_lat,
             player_longitude=player_lng), action=2)
 
-    def seq_spin_pokestop(self, fort_id, fort_lat, fort_lng, player_lat,
-                          player_lng):
-        self.req_fort_details(fort_id, fort_lat, fort_lng)
-        #        name = responses['FORT_DETAILS'].name
-        return self.req_fort_search(fort_id, fort_lat, fort_lng, player_lat, player_lng)
-
     def req_add_fort_modifier(self, modifier_id, fort_id, player_lat, player_lng):
         response = self.perform_request(lambda req: req.add_fort_modifier(
             modifier_type=modifier_id,
@@ -540,6 +537,12 @@ class POGOAccount(object):
             lambda req: req.use_item_egg_incubator(
                 item_id=incubator_id,
                 pokemon_id=egg_id))
+
+    def seq_spin_pokestop(self, fort_id, fort_lat, fort_lng, player_lat,
+                          player_lng):
+        # We first need to tap the Pokestop before we can spin it, so it's a sequence of actions
+        self.req_fort_details(fort_id, fort_lat, fort_lng)
+        return self.req_fort_search(fort_id, fort_lat, fort_lng, player_lat, player_lng)
 
     # =======================================================================
 
