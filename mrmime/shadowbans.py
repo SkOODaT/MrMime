@@ -1,18 +1,21 @@
 # Functions to deal with shadowbans / rareless scans
 
-# Removed 0.85.7
-#19,     # Rattata
+# Removed 0.89.1
+#41,     # Zubat
 #72,     # Tentacool
 #74,     # Geodude
+#161,    # Sentret
+#165,    # Ledyba
 #167,    # Spinarak
+#198,    # Murkrow
 
 COMMON_POKEMON = [
     16,     # Pidgey
+    19,     # Rattata
     23,     # Ekans
     27,     # Sandshrew
     29,     # Nidoran F
     32,     # Nidoran M
-    41,     # Zubat
     43,     # Oddish
     46,     # Paras
     52,     # Meowth
@@ -25,16 +28,15 @@ COMMON_POKEMON = [
     118,    # Goldeen
     120,    # Staryu
     129,    # Magikarp
-    161,    # Sentret
-    165,    # Ledyba
     177,    # Natu
     183,    # Marill
     187,    # Hoppip
     191,    # Sunkern
     194,    # Wooper
-    198,    # Murkrow
     209,    # Snubbull
     218,    # Slugma
+    293,    # Whismur
+    304,    # Aron
     320,    # Wailmer
     325,    # Spoink
     339     # Barboach
